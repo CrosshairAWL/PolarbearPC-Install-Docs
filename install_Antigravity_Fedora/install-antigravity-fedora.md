@@ -9,29 +9,27 @@
 
 1. Download **Antigravity** and **Antigravity IDE** from [Antigravity Google](https://antigravity.google/download).
 
-2. Rename them to `Antigravity.tar.gz` and `Antigravity_IDE.tar.gz` (for convenient installation).
-
-3. Make install dir in `/opt/` and extract them:
+2. Make install dir in `/opt/` and extract them:
 ```bash
 sudo mkdir -p /opt/antigravity /opt/antigravity-ide
 
 sudo tar -xzf ~/Downloads/Antigravity.tar.gz -C /opt/antigravity --strip-components=1
-sudo tar -xzf ~/Downloads/Antigravity_IDE.tar.gz -C /opt/antigravity-ide --strip-components=1
+sudo tar -xzf ~/Downloads/'Antigravity IDE.tar.gz' -C /opt/antigravity-ide --strip-components=1
 ```
 
-4. Create global sysmlinks: 
+3. Create global sysmlinks: 
 ```bash
 sudo ln -sf /opt/antigravity/antigravity /usr/local/bin/antigravity
 sudo ln -sf /opt/antigravity-ide/bin/antigravity-ide /usr/local/bin/antigravity-ide
 sudo ln -sf /opt/antigravity-ide/bin/antigravity-ide /usr/local/bin/agy-ide
 ```
 
-5. Verification, should return version and symlink dir. 
+4. Verification, should return version and symlink dir. 
 ```bash
 antigravity-ide --version && which antigravity agy-ide
 ```
 
-6. Create separate launcher entries:
+5. Create separate launcher entries:
 ```bash
 IDE_ICON=$(find /opt/antigravity-ide -name "code.png" -o -name "*antigravity*.png" | head -n 1)
 
@@ -63,9 +61,9 @@ EOF
 sudo update-desktop-database /usr/share/applications
 ```
 
-7. Delete the tar downloads to clean the deployment:
+6. Delete the tar downloads to clean the deployment:
 ```bash
-rm -f ~/Downloads/Antigravity.tar.gz ~/Downloads/Antigravity_IDE.tar.gz
+rm -f ~/Downloads/Antigravity.tar.gz ~/Downloads/'Antigravity IDE.tar.gz'
 ```
 
 ## 2. Manage Update
@@ -78,13 +76,13 @@ Context:
 (Should be) easy steps: 
 1. Wait on update notification from Antigravity and Antigravity IDE.
 
-2. Download **Antigravity** and **Antigravity IDE** from [Antigravity Google](https://antigravity.google/download). Rename them to `Antigravity.tar.gz` and `Antigravity_IDE.tar.gz` (for convenient installation).
+2. Download **Antigravity** and **Antigravity IDE** from [Antigravity Google](https://antigravity.google/download).
 
 3. Download, chmod +x, and run `update-Antigravity` script on this git here.
 
 4. Delete the tar downloads to clean the deployment:
 ```bash
-rm -f ~/Downloads/Antigravity.tar.gz ~/Downloads/Antigravity_IDE.tar.gz
+rm -f ~/Downloads/Antigravity.tar.gz ~/Downloads/'Antigravity IDE.tar.gz'
 ```
 
 ## 3. update-Antigravity Script Bug Report
