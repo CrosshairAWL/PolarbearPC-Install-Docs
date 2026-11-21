@@ -1,0 +1,41 @@
+#!/usr/bin/env bash
+
+: <<'NOTE'
+Update Google official downloaded Antigravity and Antigravity-IDE.
+
+Steps:
+1. Download the app and its IDE on https://antigravity.google/download/
+2. Rename them to Antigravity.tar.gz and Antigravity_IDE.tar.gz
+3. Run this script.
+
+
+By Polarbear
+NOTE
+
+set -euo pipefail
+
+pkill -f -i antigravity || true
+
+updated=0
+if [ -f "$HOME/Downloads/Antigravity.tar.gz" ]; then
+  echo "Updating agy Hub..."
+  sudo rm -rf /opt/antigravity/*
+  sudo tar -xzf "$HOME/Downloads/Antigravity.tar.gz" -C /opt/antigravity --strip-components=1
+  rm -f "$HOME/Downloads/Antigravity.tar.gz"
+  updated=1
+fi
+
+if [ -f "$HOME/Downloads/Antigravity_IDE.tar.gz" ]; then
+  echo "Updating agy IDE..."
+  sudo rm -rf /opt/antigravity-ide/*
+  sudo tar -xzf "$HOME/Downloads/Antigravity_IDE.tar.gz" -C /opt/antigravity-ide --strip-components=1
+  rm -f "$HOME/Downloads/Antigravity_IDE.tar.gz"
+  updated=1
+fi
+
+if [ "$updated" -eq 0 ]; then
+  echo "No Antigravity*.tar.gz found in ~/Downloads."
+  exit 1
+fi
+
+echo "Done! Current IDE version: $(agy-ide --version | head -n 1)"
