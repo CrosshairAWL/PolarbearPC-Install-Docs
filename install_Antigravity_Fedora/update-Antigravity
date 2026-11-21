@@ -1,41 +1,410 @@
 #!/usr/bin/env bash
 
 : <<'NOTE'
-Update Google official downloaded Antigravity and Antigravity-IDE.
+Update Google official downloaded Antigravity and Antigravity IDE.
 
 Steps:
-1. Download the app and its IDE on https://antigravity.google/download/
-2. Rename them to Antigravity.tar.gz and Antigravity_IDE.tar.gz
-3. Run this script.
+1. Download the app and/or IDE from https://antigravity.google/download/
+2. Run this script.
 
-
-By Polarbear
+By Polarbear / Gemini
 NOTE
 
 set -euo pipefail
 
-pkill -f -i antigravity || true
+SCRIPT_NAME="$(basename "$0")"
+SCRIPT_VERSION="1.0.0"
 
-updated=0
-if [ -f "$HOME/Downloads/Antigravity.tar.gz" ]; then
-  echo "Updating agy Hub..."
-  sudo rm -rf /opt/antigravity/*
-  sudo tar -xzf "$HOME/Downloads/Antigravity.tar.gz" -C /opt/antigravity --strip-components=1
-  rm -f "$HOME/Downloads/Antigravity.tar.gz"
-  updated=1
+DOWNLOAD_DIR="$HOME/Downloads"
+HUB_DIR="/opt/antigravity"
+IDE_DIR="/opt/antigravity-ide"
+
+force=false
+assume_yes=false
+keep_archive=false
+dry_run=false
+
+cleanup_dirs=()
+cleanup() {
+  local dir
+  for dir in "${cleanup_dirs[@]}"; do
+    if [[ -n "$dir" && -d "$dir" ]]; then
+      sudo rm -rf "$dir" 2>/dev/null || true
+    fi
+  done
+}
+trap cleanup EXIT
+
+show_help() {
+  cat <<EOF
+Usage: $SCRIPT_NAME [OPTIONS]
+
+Update Antigravity Hub and/or Antigravity IDE from official .tar.gz archives.
+
+Options:
+  -f, --force       Install even if archive version is the same or older
+  -y, --yes         Skip confirmation prompt
+      --keep        Keep downloaded .tar.gz archive(s) after updating
+      --dry-run     Check archives and versions without making changes
+  -d, --dir PATH    Directory to look for archives (default: ~/Downloads)
+  -v, --version     Show script and installed Antigravity versions
+  -h, --help        Show this help message
+
+Expected archives:
+  Antigravity.tar.gz                         -> $HUB_DIR
+  Antigravity IDE.tar.gz (or _IDE.tar.gz)    -> $IDE_DIR
+EOF
+}
+
+read_asar_version() {
+  python3 -c '
+import json, struct, sys
+
+data = sys.stdin.buffer.read() if len(sys.argv) < 2 else open(sys.argv[1], "rb").read()
+if len(data) < 16:
+    sys.exit(1)
+_, header_size, _, str_size = struct.unpack("<4I", data[:16])
+header = json.loads(data[16:16 + str_size].decode("utf-8"))
+pkg = header["files"]["package.json"]
+start = 8 + header_size + int(pkg["offset"])
+pkg_json = json.loads(data[start:start + pkg["size"]].decode("utf-8"))
+version = pkg_json.get("version", "")
+if not version:
+    sys.exit(1)
+print(version)
+' "$@"
+}
+
+read_product_version() {
+  python3 -c '
+import json, sys
+
+data = json.load(sys.stdin) if len(sys.argv) < 2 else json.load(open(sys.argv[1], "r", encoding="utf-8"))
+version = data.get("ideVersion") or data.get("version") or ""
+if not version:
+    sys.exit(1)
+print(version)
+' "$@"
+}
+
+get_installed_version() {
+  local kind="$1"
+  if [[ "$kind" == "hub" ]]; then
+    local asar="$HUB_DIR/resources/app.asar"
+    [[ -f "$asar" ]] || return 0
+    read_asar_version "$asar" 2>/dev/null || true
+  else
+    local product="$IDE_DIR/resources/app/product.json"
+    [[ -f "$product" ]] || return 0
+    read_product_version "$product" 2>/dev/null || true
+  fi
+}
+
+get_archive_version() {
+  local kind="$1"
+  local archive="$2"
+  if [[ "$kind" == "hub" ]]; then
+    tar -xzOf "$archive" --no-wildcards-match-slash --wildcards '*/resources/app.asar' 2>/dev/null | read_asar_version 2>/dev/null
+  else
+    tar -xzOf "$archive" --no-wildcards-match-slash --wildcards '*/resources/app/product.json' 2>/dev/null | read_product_version 2>/dev/null
+  fi
+}
+
+show_version() {
+  local hub_ver ide_ver
+  hub_ver="$(get_installed_version hub)"
+  ide_ver="$(get_installed_version ide)"
+  echo "$SCRIPT_NAME $SCRIPT_VERSION"
+  echo "Antigravity Hub: ${hub_ver:-not installed}"
+  echo "Antigravity IDE: ${ide_ver:-not installed}"
+}
+
+compare_versions() {
+  local installed="$1"
+  local archive="$2"
+
+  if [[ -z "$installed" ]]; then
+    echo "install"
+    return
+  fi
+  if [[ "$installed" == "$archive" ]]; then
+    echo "same"
+    return
+  fi
+  if [[ "$(printf '%s\n%s\n' "$installed" "$archive" | sort -V | tail -n 1)" == "$archive" ]]; then
+    echo "newer"
+  else
+    echo "older"
+  fi
+}
+
+is_running_inside() {
+  local target_dir="$1"
+  local pid="$$"
+  local exe ppid
+
+  while [[ -n "$pid" && "$pid" -gt 1 ]]; do
+    exe="$(readlink -f "/proc/$pid/exe" 2>/dev/null || true)"
+    if [[ "$exe" == "$target_dir"/* ]]; then
+      return 0
+    fi
+    ppid="$(awk '/^PPid:/ {print $2}' "/proc/$pid/status" 2>/dev/null || true)"
+    [[ -n "$ppid" && "$ppid" != "$pid" ]] || break
+    pid="$ppid"
+  done
+  return 1
+}
+
+stop_app() {
+  local target_dir="$1"
+  local pids=()
+  local proc_dir pid exe
+
+  for proc_dir in /proc/[0-9]*; do
+    pid="${proc_dir#/proc/}"
+    [[ "$pid" == "$$" || "$pid" == "$BASHPID" ]] && continue
+    exe="$(readlink -f "$proc_dir/exe" 2>/dev/null || true)"
+    if [[ "$exe" == "$target_dir"/* ]]; then
+      pids+=("$pid")
+    fi
+  done
+
+  if (( ${#pids[@]} == 0 )); then
+    return 0
+  fi
+
+  echo "Stopping running processes in $target_dir..."
+  kill -TERM "${pids[@]}" 2>/dev/null || true
+
+  local i alive
+  for (( i = 0; i < 10; i++ )); do
+    alive=0
+    for pid in "${pids[@]}"; do
+      if kill -0 "$pid" 2>/dev/null; then
+        alive=1
+        break
+      fi
+    done
+    (( alive == 0 )) && return 0
+    sleep 0.5
+  done
+
+  kill -KILL "${pids[@]}" 2>/dev/null || true
+  sleep 0.2
+}
+
+update_component() {
+  local label="$1"
+  local archive="$2"
+  local target_dir="$3"
+
+  local stage_dir="${target_dir}.new.$$"
+  local backup_dir="${target_dir}.bak.$$"
+  cleanup_dirs+=("$stage_dir")
+
+  echo ""
+  echo "Updating $label..."
+  sudo mkdir -p "$stage_dir"
+  sudo tar --no-same-owner -xzf "$archive" -C "$stage_dir" --strip-components=1
+
+  stop_app "$target_dir"
+
+  if [[ -d "$target_dir" ]]; then
+    sudo mv "$target_dir" "$backup_dir"
+  fi
+
+  if ! sudo mv "$stage_dir" "$target_dir"; then
+    echo "Failed to swap $label into $target_dir; restoring previous version..." >&2
+    if [[ -d "$backup_dir" ]]; then
+      sudo mv "$backup_dir" "$target_dir"
+    fi
+    return 1
+  fi
+
+  if [[ -d "$backup_dir" ]]; then
+    sudo rm -rf "$backup_dir"
+  fi
+
+  if ! $keep_archive; then
+    rm -f "$archive"
+  fi
+}
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    -f|--force)
+      force=true
+      shift
+      ;;
+    -y|--yes)
+      assume_yes=true
+      shift
+      ;;
+    --keep)
+      keep_archive=true
+      shift
+      ;;
+    --dry-run|--check)
+      dry_run=true
+      shift
+      ;;
+    -d|--dir)
+      if [[ $# -lt 2 ]]; then
+        echo "Error: $1 requires a directory path." >&2
+        exit 2
+      fi
+      DOWNLOAD_DIR="$2"
+      shift 2
+      ;;
+    -v|--version)
+      show_version
+      exit 0
+      ;;
+    -h|--help)
+      show_help
+      exit 0
+      ;;
+    *)
+      echo "Unknown option: $1" >&2
+      echo "Run '$SCRIPT_NAME --help' for usage." >&2
+      exit 2
+      ;;
+  esac
+done
+
+hub_archive=""
+ide_archive=""
+
+if [[ -f "$DOWNLOAD_DIR/Antigravity.tar.gz" ]]; then
+  hub_archive="$DOWNLOAD_DIR/Antigravity.tar.gz"
 fi
 
-if [ -f "$HOME/Downloads/Antigravity_IDE.tar.gz" ]; then
-  echo "Updating agy IDE..."
-  sudo rm -rf /opt/antigravity-ide/*
-  sudo tar -xzf "$HOME/Downloads/Antigravity_IDE.tar.gz" -C /opt/antigravity-ide --strip-components=1
-  rm -f "$HOME/Downloads/Antigravity_IDE.tar.gz"
-  updated=1
+ide_default="$DOWNLOAD_DIR/Antigravity IDE.tar.gz"
+ide_legacy="$DOWNLOAD_DIR/Antigravity_IDE.tar.gz"
+
+if [[ -f "$ide_default" && -f "$ide_legacy" ]]; then
+  echo "Error: Both 'Antigravity IDE.tar.gz' and 'Antigravity_IDE.tar.gz' exist in $DOWNLOAD_DIR." >&2
+  echo "Remove one so the intended archive is unambiguous." >&2
+  exit 1
+elif [[ -f "$ide_default" ]]; then
+  ide_archive="$ide_default"
+elif [[ -f "$ide_legacy" ]]; then
+  ide_archive="$ide_legacy"
 fi
 
-if [ "$updated" -eq 0 ]; then
-  echo "No Antigravity*.tar.gz found in ~/Downloads."
+if [[ -z "$hub_archive" && -z "$ide_archive" ]]; then
+  echo "No Antigravity archives found in $DOWNLOAD_DIR."
   exit 1
 fi
 
-echo "Done! Current IDE version: $(agy-ide --version | head -n 1)"
+queued_kinds=()
+queued_labels=()
+queued_archives=()
+queued_dirs=()
+queued_old_vers=()
+queued_new_vers=()
+has_downgrade=false
+
+inspect_component() {
+  local kind="$1"
+  local label="$2"
+  local archive="$3"
+  local target_dir="$4"
+
+  local installed_ver archive_ver status
+  installed_ver="$(get_installed_version "$kind")"
+
+  if ! archive_ver="$(get_archive_version "$kind" "$archive")" || [[ -z "$archive_ver" ]]; then
+    echo "Error: Could not read version from '$archive' (corrupt or unexpected archive)." >&2
+    exit 1
+  fi
+
+  status="$(compare_versions "$installed_ver" "$archive_ver")"
+
+  case "$status" in
+    install)
+      echo "$label: not installed -> $archive_ver (install)"
+      ;;
+    newer)
+      echo "$label: $installed_ver -> $archive_ver (update)"
+      ;;
+    same)
+      if $force; then
+        echo "$label: $installed_ver == $archive_ver (reinstall, --force)"
+      else
+        echo "$label: $installed_ver == $archive_ver (already up to date, skipped — use --force to reinstall)"
+        return 0
+      fi
+      ;;
+    older)
+      if $force; then
+        echo "$label: $installed_ver -> $archive_ver (DOWNGRADE, --force)"
+        has_downgrade=true
+      else
+        echo "$label: $installed_ver -> $archive_ver (older than installed, skipped — use --force to downgrade)"
+        return 0
+      fi
+      ;;
+  esac
+
+  queued_kinds+=("$kind")
+  queued_labels+=("$label")
+  queued_archives+=("$archive")
+  queued_dirs+=("$target_dir")
+  queued_old_vers+=("${installed_ver:-not installed}")
+  queued_new_vers+=("$archive_ver")
+}
+
+if [[ -n "$hub_archive" ]]; then
+  inspect_component hub "Antigravity Hub" "$hub_archive" "$HUB_DIR"
+fi
+
+if [[ -n "$ide_archive" ]]; then
+  inspect_component ide "Antigravity IDE" "$ide_archive" "$IDE_DIR"
+fi
+
+if $dry_run; then
+  exit 0
+fi
+
+if (( ${#queued_kinds[@]} == 0 )); then
+  echo ""
+  echo "Nothing to update."
+  exit 0
+fi
+
+for i in "${!queued_dirs[@]}"; do
+  if is_running_inside "${queued_dirs[$i]}"; then
+    echo "" >&2
+    echo "Error: This script is running inside ${queued_labels[$i]}." >&2
+    echo "Updating it would terminate this terminal mid-install. Run from an external terminal instead." >&2
+    exit 1
+  fi
+done
+
+if $has_downgrade; then
+  echo ""
+  echo "Warning: This will downgrade an installed component."
+fi
+
+if ! $assume_yes; then
+  echo ""
+  read -r -p "Proceed with update? [y/N] " reply
+  if [[ ! "$reply" =~ ^[Yy]$ ]]; then
+    echo "Update cancelled."
+    exit 0
+  fi
+fi
+
+sudo -v
+
+for i in "${!queued_kinds[@]}"; do
+  update_component "${queued_labels[$i]}" "${queued_archives[$i]}" "${queued_dirs[$i]}"
+done
+
+echo ""
+echo "Done!"
+for i in "${!queued_kinds[@]}"; do
+  new_installed="$(get_installed_version "${queued_kinds[$i]}")"
+  echo "${queued_labels[$i]}: ${queued_old_vers[$i]} -> ${new_installed:-${queued_new_vers[$i]}}"
+done
