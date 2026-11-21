@@ -1,13 +1,13 @@
-# Install Antigravity app and IDE on Fedora
+# Install & Manage Antigravity and its IDE on Fedora
 
 ## 0. Specs
 
 - OS Fedora KDE 44
 - Official Antigravity from Google web, ver 1.107.0
 
-## 1. Installation
+## 1. Initial Installation
 
-1. Download **Antigravity** and **Antigravity IDE** from [Antigravity Google](https://antigravity.google/download)
+1. Download **Antigravity** and **Antigravity IDE** from [Antigravity Google](https://antigravity.google/download).
 
 2. Rename them to `Antigravity.tar.gz` and `Antigravity_IDE.tar.gz` (for convenient installation).
 
@@ -62,3 +62,30 @@ EOF
 
 sudo update-desktop-database /usr/share/applications
 ```
+
+7. Delete the tar downloads to clean the deployment:
+```bash
+rm -f ~/Downloads/Antigravity.tar.gz ~/Downloads/Antigravity_IDE.tar.gz
+```
+
+## 2. Manage Update
+
+Context:
+- Built-in updater cannot overwrite `/opt`. 
+- Should be done manually.
+- This update will preserve the symlinks, skills, chats, settings, etc.
+
+(Should be) easy steps: 
+1. Wait on update notification from Antigravity and Antigravity IDE.
+
+2. Download **Antigravity** and **Antigravity IDE** from [Antigravity Google](https://antigravity.google/download). Rename them to `Antigravity.tar.gz` and `Antigravity_IDE.tar.gz` (for convenient installation).
+
+3. Download, chmod +x, and run `update-Antigravity` script here (or you can put it on `/usr/local/bin` whatever).
+
+4. Delete the tar downloads to clean the deployment:
+```bash
+rm -f ~/Downloads/Antigravity.tar.gz ~/Downloads/Antigravity_IDE.tar.gz
+```
+
+## 3. update-Antigravity bug report
+Please call me at **crosshairawl.ugm@gmail.com** 
