@@ -1,37 +1,36 @@
 #!/usr/bin/env bash
 
 : <<'NOTE'
-Update Google official downloaded Antigravity and Antigravity IDE.
+Interactive updater for Google Antigravity Hub and Antigravity IDE.
+Checks latest versions from https://antigravity.google/download/ and downloads via curl.
 
-Steps:
-1. Download the app and/or IDE from https://antigravity.google/download/
-2. Run this script.
-
-By Polarbear / Gemini
+By Polarbear
 NOTE
 
 set -euo pipefail
 
 SCRIPT_NAME="$(basename "$0")"
-SCRIPT_VERSION="1.0.0"
+SCRIPT_VERSION="2.0.0"
 
-DOWNLOAD_DIR="$HOME/Downloads"
+DOWNLOAD_PAGE_URL="https://antigravity.google/download/"
 HUB_DIR="/opt/antigravity"
 IDE_DIR="/opt/antigravity-ide"
 
-force=false
-assume_yes=false
-keep_archive=false
-dry_run=false
+cleanup_tmp_dirs=()
+cleanup_sudo_dirs=()
 
-cleanup_dirs=()
 cleanup() {
   local dir
-  for dir in "${cleanup_dirs[@]}"; do
-    if [[ -n "$dir" && -d "$dir" ]]; then
-      sudo rm -rf "$dir" 2>/dev/null || true
-    fi
-  done
+  if (( ${#cleanup_tmp_dirs[@]} > 0 )); then
+    for dir in "${cleanup_tmp_dirs[@]}"; do
+      [[ -n "$dir" && -d "$dir" ]] && rm -rf "$dir" 2>/dev/null || true
+    done
+  fi
+  if (( ${#cleanup_sudo_dirs[@]} > 0 )); then
+    for dir in "${cleanup_sudo_dirs[@]}"; do
+      [[ -n "$dir" && -d "$dir" ]] && sudo rm -rf "$dir" 2>/dev/null || true
+    done
+  fi
 }
 trap cleanup EXIT
 
@@ -39,21 +38,28 @@ show_help() {
   cat <<EOF
 Usage: $SCRIPT_NAME [OPTIONS]
 
-Update Antigravity Hub and/or Antigravity IDE from official .tar.gz archives.
+Interactive updater for Antigravity Hub and Antigravity IDE.
+Checks https://antigravity.google/download/ and installs updates via curl.
 
 Options:
-  -f, --force       Install even if archive version is the same or older
-  -y, --yes         Skip confirmation prompt
-      --keep        Keep downloaded .tar.gz archive(s) after updating
-      --dry-run     Check archives and versions without making changes
-  -d, --dir PATH    Directory to look for archives (default: ~/Downloads)
   -v, --version     Show script and installed Antigravity versions
   -h, --help        Show this help message
-
-Expected archives:
-  Antigravity.tar.gz                         -> $HUB_DIR
-  Antigravity IDE.tar.gz (or _IDE.tar.gz)    -> $IDE_DIR
 EOF
+}
+
+detect_arch() {
+  case "$(uname -m)" in
+    x86_64)
+      echo "linux-x64"
+      ;;
+    aarch64|arm64)
+      echo "linux-arm"
+      ;;
+    *)
+      echo "Error: Unsupported architecture '$(uname -m)'." >&2
+      exit 1
+      ;;
+  esac
 }
 
 read_asar_version() {
@@ -121,21 +127,100 @@ show_version() {
 
 compare_versions() {
   local installed="$1"
-  local archive="$2"
+  local latest="$2"
 
+  if [[ -z "$latest" ]]; then
+    echo "unavailable"
+    return
+  fi
   if [[ -z "$installed" ]]; then
     echo "install"
     return
   fi
-  if [[ "$installed" == "$archive" ]]; then
+  if [[ "$installed" == "$latest" ]]; then
     echo "same"
     return
   fi
-  if [[ "$(printf '%s\n%s\n' "$installed" "$archive" | sort -V | tail -n 1)" == "$archive" ]]; then
+  if [[ "$(printf '%s\n%s\n' "$installed" "$latest" | sort -V | tail -n 1)" == "$latest" ]]; then
     echo "newer"
   else
     echo "older"
   fi
+}
+
+fetch_online_releases() {
+  local arch="$1"
+  local html parsed
+
+  hub_latest=""
+  hub_url=""
+  ide_latest=""
+  ide_url=""
+  online_ok=false
+
+  echo "Checking latest versions online..."
+  if ! html="$(curl -fsSL --max-time 15 "$DOWNLOAD_PAGE_URL" 2>/dev/null)"; then
+    echo "Warning: Could not reach $DOWNLOAD_PAGE_URL." >&2
+    return 0
+  fi
+
+  if ! parsed="$(printf '%s' "$html" | python3 -c '
+import re, sys
+
+arch = re.escape(sys.argv[1])
+html = sys.stdin.read()
+
+hub_re = re.compile(r"https://[^\s\"'\''<>]+/(\d+(?:\.\d+)+)[^\s\"'\''<>]*/" + arch + r"/Antigravity\.tar\.gz")
+ide_re = re.compile(r"https://[^\s\"'\''<>]+/(\d+(?:\.\d+)+)[^\s\"'\''<>]*/" + arch + r"/Antigravity%20IDE\.tar\.gz")
+
+hub_m = hub_re.search(html)
+ide_m = ide_re.search(html)
+
+hub_ver = hub_m.group(1) if hub_m else ""
+hub_u = hub_m.group(0) if hub_m else ""
+ide_ver = ide_m.group(1) if ide_m else ""
+ide_u = ide_m.group(0) if ide_m else ""
+
+print(f"{hub_ver}\t{hub_u}")
+print(f"{ide_ver}\t{ide_u}")
+' "$arch" 2>/dev/null)"; then
+    echo "Warning: Could not parse release info from $DOWNLOAD_PAGE_URL." >&2
+    return 0
+  fi
+
+  IFS=$'\t' read -r hub_latest hub_url <<< "$(printf '%s\n' "$parsed" | sed -n '1p')"
+  IFS=$'\t' read -r ide_latest ide_url <<< "$(printf '%s\n' "$parsed" | sed -n '2p')"
+
+  if [[ -n "$hub_latest" || -n "$ide_latest" ]]; then
+    online_ok=true
+  fi
+}
+
+refresh_local_state() {
+  hub_installed="$(get_installed_version hub)"
+  ide_installed="$(get_installed_version ide)"
+
+  hub_cmp="$(compare_versions "$hub_installed" "$hub_latest")"
+  ide_cmp="$(compare_versions "$ide_installed" "$ide_latest")"
+
+  hub_avail=false
+  ide_avail=false
+
+  case "$hub_cmp" in
+    install)     hub_status="Not installed";    hub_avail=true ;;
+    newer)       hub_status="Update available"; hub_avail=true ;;
+    same)        hub_status="Up to date" ;;
+    older)       hub_status="Newer installed" ;;
+    unavailable) hub_status="Check failed" ;;
+  esac
+
+  case "$ide_cmp" in
+    install)     ide_status="Not installed";    ide_avail=true ;;
+    newer)       ide_status="Update available"; ide_avail=true ;;
+    same)        ide_status="Up to date" ;;
+    older)       ide_status="Newer installed" ;;
+    unavailable) ide_status="Check failed" ;;
+  esac
 }
 
 is_running_inside() {
@@ -193,19 +278,46 @@ stop_app() {
   sleep 0.2
 }
 
-update_component() {
-  local label="$1"
-  local archive="$2"
-  local target_dir="$3"
+install_component() {
+  local kind="$1"
+  local label="$2"
+  local url="$3"
+  local target_dir="$4"
+  local old_ver="$5"
 
-  local stage_dir="${target_dir}.new.$$"
-  local backup_dir="${target_dir}.bak.$$"
-  cleanup_dirs+=("$stage_dir")
+  local tmp_dir part_file archive archive_ver stage_dir backup_dir
+  tmp_dir="$(mktemp -d /tmp/update-antigravity.XXXXXX)"
+  cleanup_tmp_dirs+=("$tmp_dir")
+
+  part_file="$tmp_dir/${kind}.tar.gz.part"
+  archive="$tmp_dir/${kind}.tar.gz"
+  stage_dir="${target_dir}.new.$$"
+  backup_dir="${target_dir}.bak.$$"
+  cleanup_sudo_dirs+=("$stage_dir")
 
   echo ""
-  echo "Updating $label..."
+  echo "Downloading $label..."
+  if ! curl -fL# --max-time 600 -o "$part_file" "$url"; then
+    echo "Error: Failed to download $label." >&2
+    rm -rf "$tmp_dir"
+    return 1
+  fi
+  mv "$part_file" "$archive"
+
+  if ! archive_ver="$(get_archive_version "$kind" "$archive")" || [[ -z "$archive_ver" ]]; then
+    echo "Error: Downloaded archive for $label is invalid or corrupted." >&2
+    rm -rf "$tmp_dir"
+    return 1
+  fi
+
+  echo "Installing $label ($archive_ver)..."
   sudo mkdir -p "$stage_dir"
-  sudo tar --no-same-owner -xzf "$archive" -C "$stage_dir" --strip-components=1
+  if ! sudo tar --no-same-owner -xzf "$archive" -C "$stage_dir" --strip-components=1; then
+    echo "Error: Failed to extract $label." >&2
+    rm -rf "$tmp_dir"
+    sudo rm -rf "$stage_dir"
+    return 1
+  fi
 
   stop_app "$target_dir"
 
@@ -214,10 +326,11 @@ update_component() {
   fi
 
   if ! sudo mv "$stage_dir" "$target_dir"; then
-    echo "Failed to swap $label into $target_dir; restoring previous version..." >&2
+    echo "Error: Failed to swap $label into $target_dir; restoring previous version..." >&2
     if [[ -d "$backup_dir" ]]; then
       sudo mv "$backup_dir" "$target_dir"
     fi
+    rm -rf "$tmp_dir"
     return 1
   fi
 
@@ -225,37 +338,121 @@ update_component() {
     sudo rm -rf "$backup_dir"
   fi
 
-  if ! $keep_archive; then
-    rm -f "$archive"
+  rm -rf "$tmp_dir"
+
+  local new_ver
+  new_ver="$(get_installed_version "$kind")"
+  echo "Updated $label: ${old_ver:-not installed} -> ${new_ver:-$archive_ver}"
+}
+
+run_selected_updates() {
+  local targets=("$@")
+  local target dir label
+
+  echo ""
+  echo "Selected update(s):"
+  for target in "${targets[@]}"; do
+    if [[ "$target" == "hub" ]]; then
+      echo "  - Antigravity Hub: ${hub_installed:-not installed} -> $hub_latest"
+    else
+      echo "  - Antigravity IDE: ${ide_installed:-not installed} -> $ide_latest"
+    fi
+  done
+
+  echo ""
+  read -r -p "Proceed with download and update? [y/N] " reply || return 0
+  if [[ ! "$reply" =~ ^[Yy]$ ]]; then
+    echo "Update cancelled."
+    return 0
   fi
+
+  for target in "${targets[@]}"; do
+    if [[ "$target" == "hub" ]]; then
+      dir="$HUB_DIR"
+      label="Antigravity Hub"
+    else
+      dir="$IDE_DIR"
+      label="Antigravity IDE"
+    fi
+    if is_running_inside "$dir"; then
+      echo "" >&2
+      echo "Error: This script is running inside $label." >&2
+      echo "Updating it would terminate this terminal mid-install. Run from an external terminal instead." >&2
+      return 1
+    fi
+  done
+
+  if ! sudo -v; then
+    echo "Error: sudo authentication failed." >&2
+    return 1
+  fi
+
+  for target in "${targets[@]}"; do
+    if [[ "$target" == "hub" ]]; then
+      install_component hub "Antigravity Hub" "$hub_url" "$HUB_DIR" "$hub_installed" || return 1
+    else
+      install_component ide "Antigravity IDE" "$ide_url" "$IDE_DIR" "$ide_installed" || return 1
+    fi
+  done
+
+  refresh_local_state
+}
+
+print_dashboard() {
+  echo ""
+  echo "Antigravity Updater (v$SCRIPT_VERSION)"
+  echo "───────────────────────────────────────────────────────"
+  printf "%-18s %-12s %-10s %s\n" "Component" "Installed" "Latest" "Status"
+  printf "%-18s %-12s %-10s %s\n" "Antigravity Hub" "${hub_installed:-not found}" "${hub_latest:--}" "$hub_status"
+  printf "%-18s %-12s %-10s %s\n" "Antigravity IDE" "${ide_installed:-not found}" "${ide_latest:--}" "$ide_status"
+  echo "───────────────────────────────────────────────────────"
+
+  if $hub_avail; then
+    if [[ "$hub_cmp" == "install" ]]; then
+      echo "1) Install Antigravity Hub ($hub_latest)"
+    else
+      echo "1) Update Antigravity Hub ($hub_installed -> $hub_latest)"
+    fi
+  fi
+
+  if $ide_avail; then
+    if [[ "$ide_cmp" == "install" ]]; then
+      echo "2) Install Antigravity IDE ($ide_latest)"
+    else
+      echo "2) Update Antigravity IDE ($ide_installed -> $ide_latest)"
+    fi
+  fi
+
+  if $hub_avail && $ide_avail; then
+    echo "3) Update Both (Hub & IDE)"
+  fi
+
+  if ! $hub_avail && ! $ide_avail; then
+    if $online_ok; then
+      echo "Everything is already up to date."
+    else
+      echo "Could not fetch latest versions online."
+    fi
+    echo ""
+  fi
+
+  echo "r) Re-check online"
+  echo "0) Exit"
+}
+
+show_banner() {
+  cat << 'EOF'
+  _    ___  \   /   |  |  __   __    _   _____  ___  __
+ /_\  / __   \ /    |  | |__| |  \  /_\    |   |__  |__/
+/   \ \___|   |     \__/ |    |__/ /   \   |   |___ |  \
+
+                By Polarbear and Gemini
+
+EOF
 }
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    -f|--force)
-      force=true
-      shift
-      ;;
-    -y|--yes)
-      assume_yes=true
-      shift
-      ;;
-    --keep)
-      keep_archive=true
-      shift
-      ;;
-    --dry-run|--check)
-      dry_run=true
-      shift
-      ;;
-    -d|--dir)
-      if [[ $# -lt 2 ]]; then
-        echo "Error: $1 requires a directory path." >&2
-        exit 2
-      fi
-      DOWNLOAD_DIR="$2"
-      shift 2
-      ;;
     -v|--version)
       show_version
       exit 0
@@ -272,139 +469,51 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-hub_archive=""
-ide_archive=""
+show_banner
+ARCH="$(detect_arch)"
+fetch_online_releases "$ARCH"
+refresh_local_state
 
-if [[ -f "$DOWNLOAD_DIR/Antigravity.tar.gz" ]]; then
-  hub_archive="$DOWNLOAD_DIR/Antigravity.tar.gz"
-fi
-
-ide_default="$DOWNLOAD_DIR/Antigravity IDE.tar.gz"
-ide_legacy="$DOWNLOAD_DIR/Antigravity_IDE.tar.gz"
-
-if [[ -f "$ide_default" && -f "$ide_legacy" ]]; then
-  echo "Error: Both 'Antigravity IDE.tar.gz' and 'Antigravity_IDE.tar.gz' exist in $DOWNLOAD_DIR." >&2
-  echo "Remove one so the intended archive is unambiguous." >&2
-  exit 1
-elif [[ -f "$ide_default" ]]; then
-  ide_archive="$ide_default"
-elif [[ -f "$ide_legacy" ]]; then
-  ide_archive="$ide_legacy"
-fi
-
-if [[ -z "$hub_archive" && -z "$ide_archive" ]]; then
-  echo "No Antigravity archives found in $DOWNLOAD_DIR."
-  exit 1
-fi
-
-queued_kinds=()
-queued_labels=()
-queued_archives=()
-queued_dirs=()
-queued_old_vers=()
-queued_new_vers=()
-has_downgrade=false
-
-inspect_component() {
-  local kind="$1"
-  local label="$2"
-  local archive="$3"
-  local target_dir="$4"
-
-  local installed_ver archive_ver status
-  installed_ver="$(get_installed_version "$kind")"
-
-  if ! archive_ver="$(get_archive_version "$kind" "$archive")" || [[ -z "$archive_ver" ]]; then
-    echo "Error: Could not read version from '$archive' (corrupt or unexpected archive)." >&2
-    exit 1
-  fi
-
-  status="$(compare_versions "$installed_ver" "$archive_ver")"
-
-  case "$status" in
-    install)
-      echo "$label: not installed -> $archive_ver (install)"
-      ;;
-    newer)
-      echo "$label: $installed_ver -> $archive_ver (update)"
-      ;;
-    same)
-      if $force; then
-        echo "$label: $installed_ver == $archive_ver (reinstall, --force)"
-      else
-        echo "$label: $installed_ver == $archive_ver (already up to date, skipped — use --force to reinstall)"
-        return 0
-      fi
-      ;;
-    older)
-      if $force; then
-        echo "$label: $installed_ver -> $archive_ver (DOWNGRADE, --force)"
-        has_downgrade=true
-      else
-        echo "$label: $installed_ver -> $archive_ver (older than installed, skipped — use --force to downgrade)"
-        return 0
-      fi
-      ;;
-  esac
-
-  queued_kinds+=("$kind")
-  queued_labels+=("$label")
-  queued_archives+=("$archive")
-  queued_dirs+=("$target_dir")
-  queued_old_vers+=("${installed_ver:-not installed}")
-  queued_new_vers+=("$archive_ver")
-}
-
-if [[ -n "$hub_archive" ]]; then
-  inspect_component hub "Antigravity Hub" "$hub_archive" "$HUB_DIR"
-fi
-
-if [[ -n "$ide_archive" ]]; then
-  inspect_component ide "Antigravity IDE" "$ide_archive" "$IDE_DIR"
-fi
-
-if $dry_run; then
-  exit 0
-fi
-
-if (( ${#queued_kinds[@]} == 0 )); then
+while true; do
+  print_dashboard
   echo ""
-  echo "Nothing to update."
-  exit 0
-fi
-
-for i in "${!queued_dirs[@]}"; do
-  if is_running_inside "${queued_dirs[$i]}"; then
-    echo "" >&2
-    echo "Error: This script is running inside ${queued_labels[$i]}." >&2
-    echo "Updating it would terminate this terminal mid-install. Run from an external terminal instead." >&2
-    exit 1
-  fi
-done
-
-if $has_downgrade; then
-  echo ""
-  echo "Warning: This will downgrade an installed component."
-fi
-
-if ! $assume_yes; then
-  echo ""
-  read -r -p "Proceed with update? [y/N] " reply
-  if [[ ! "$reply" =~ ^[Yy]$ ]]; then
-    echo "Update cancelled."
+  if ! read -r -p "Choose an option: " choice; then
+    echo ""
     exit 0
   fi
-fi
 
-sudo -v
-
-for i in "${!queued_kinds[@]}"; do
-  update_component "${queued_labels[$i]}" "${queued_archives[$i]}" "${queued_dirs[$i]}"
-done
-
-echo ""
-echo "Done!"
-for i in "${!queued_kinds[@]}"; do
-  new_installed="$(get_installed_version "${queued_kinds[$i]}")"
-  echo "${queued_labels[$i]}: ${queued_old_vers[$i]} -> ${new_installed:-${queued_new_vers[$i]}}"
+  case "$choice" in
+    1)
+      if $hub_avail; then
+        run_selected_updates hub || true
+      else
+        echo "Antigravity Hub has no update available."
+      fi
+      ;;
+    2)
+      if $ide_avail; then
+        run_selected_updates ide || true
+      else
+        echo "Antigravity IDE has no update available."
+      fi
+      ;;
+    3)
+      if $hub_avail && $ide_avail; then
+        run_selected_updates hub ide || true
+      else
+        echo "Both components must have updates available for option 3."
+      fi
+      ;;
+    r|R)
+      echo ""
+      fetch_online_releases "$ARCH"
+      refresh_local_state
+      ;;
+    0|q|Q)
+      exit 0
+      ;;
+    *)
+      echo "Invalid option: $choice"
+      ;;
+  esac
 done
