@@ -8,6 +8,7 @@ My personal choice:
 2. Search `window.restoreWindows`, select **none**.
 3. Search `workbench.startupEditor`, select **welcomePage**.
 
-## Extension
+## Extension and its Settings
 
 1. **Project Manager** by Allesandro Fragnani to pin workdir.
+    - Open in Current Window If Empty: never.
