@@ -80,10 +80,5 @@ Context:
 
 3. Download, chmod +x, and run `update-Antigravity` script on this git here.
 
-4. Delete the tar downloads to clean the deployment:
-```bash
-rm -f ~/Downloads/Antigravity.tar.gz ~/Downloads/'Antigravity IDE.tar.gz'
-```
-
 ## 3. update-Antigravity Script Bug Report
 Please call me at **crosshairawl.ugm@gmail.com** 
