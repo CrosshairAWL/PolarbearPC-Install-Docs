@@ -2,7 +2,7 @@
 
 Docs and scripts about my (maybe random and useless) installation project on my potato Linux PC. I'm a Linux noob so every installation should be documentend ._.
 
-## Polarbear's PC Essential Specs
+## PC Essential Specs
 - OS: Fedora KDE.
 - CPU: Intel Core i9 9900KS.
 - GPU: Powercolor Red Devil AMD Radeon 6800XT.
