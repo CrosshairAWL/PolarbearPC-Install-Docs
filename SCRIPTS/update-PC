@@ -1,0 +1,91 @@
+#!/usr/bin/env bash
+
+: <<'NOTE'
+Update Fedora OS both dnf and flatpak.
+By Polarbear / Gemini 
+NOTE
+
+
+cat << 'EOF'
+ _   _   ____    ____      _     _____   _____
+| | | | |  _ \  |  _ \    / \   |_   _| | ____|
+| | | | | |_) | | | | |  / _ \    | |   |  _|
+| |_| | |  __/  | |_| | / ___ \   | |   | |___
+ \___/  |_|     |____/ /_/   \_\  |_|   |_____|
+
+            By Polarbear and Gemini
+
+EOF
+
+dnf_updates=false
+flatpak_updates=false
+
+check_flatpak() {
+    local scope remote
+    for scope in --system --user; do
+        while IFS= read -r remote; do
+            [[ -n "$remote" && "$remote" != "-" ]] || continue
+            flatpak remote-ls "$scope" --updates --columns=application,version "$remote" 2>/dev/null
+        done < <(flatpak list "$scope" --columns=origin 2>/dev/null | sort -u)
+    done | sort -u
+}
+
+flatpak_tmp=$(mktemp)
+trap 'rm -f "$flatpak_tmp"' EXIT
+
+echo "Checking for DNF and Flatpak updates..."
+check_flatpak > "$flatpak_tmp" &
+flatpak_pid=$!
+
+dnf check-upgrade --refresh
+dnf_status=$?
+if (( dnf_status == 100 )); then
+    dnf_updates=true
+elif (( dnf_status != 0 )); then
+    echo "Failed to check DNF updates." >&2
+fi
+
+wait "$flatpak_pid"
+flatpak_list=$(cat "$flatpak_tmp")
+
+echo ""
+echo "Flatpak updates:"
+if [[ -n "$flatpak_list" ]]; then
+    flatpak_updates=true
+    echo "$flatpak_list"
+else
+    echo "No Flatpak updates available."
+fi
+
+if ! $dnf_updates && ! $flatpak_updates; then
+    echo ""
+    echo "Everything is already up to date."
+    exit 0
+fi
+
+echo ""
+read -r -p "Updates are available. Do you want to update now? [y/N] " reply
+if [[ ! "$reply" =~ ^[Yy]$ ]]; then
+    echo "Update cancelled."
+    exit 0
+fi
+
+if $dnf_updates; then
+    echo ""
+    echo "Updating DNF packages..."
+    sudo dnf upgrade -y
+fi
+
+if $flatpak_updates; then
+    echo ""
+    echo "Updating Flatpak packages..."
+    flatpak update -y
+fi
+
+echo ""
+echo "Checking if a restart is needed..."
+if dnf -q --disablerepo='*' needs-restarting -r; then
+    echo "Your PC does NOT need a restart."
+else
+    echo "Your PC NEEDS a restart."
+fi
