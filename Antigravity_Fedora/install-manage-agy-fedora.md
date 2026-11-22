@@ -68,7 +68,7 @@ rm -f ~/Downloads/Antigravity.tar.gz ~/Downloads/'Antigravity IDE.tar.gz'
 
 ## 2. Manage Update
 
-1. Download my [update-Antigravity](https://github.com/CrosshairAWL/PolarbearPC-Install-Docs/blob/main/SCRIPTS/update-Antigravity) script. 
+1. Download my [update-Antigravity](https://github.com/CrosshairAWL/PolarbearPC-Install-Docs/blob/main/SCRIPTS/update-Antigravity) bash script. 
 
 2. Chmod +x and run it.
 
