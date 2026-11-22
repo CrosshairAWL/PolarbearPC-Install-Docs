@@ -68,17 +68,7 @@ rm -f ~/Downloads/Antigravity.tar.gz ~/Downloads/'Antigravity IDE.tar.gz'
 
 ## 2. Manage Update
 
-Context:
-- Built-in updater cannot overwrite `/opt`. 
-- Should be done manually.
-- This update will preserve the symlinks, skills, chats, settings, etc.
-
-(Should be) easy steps: 
-1. Wait on update notification from Antigravity and Antigravity IDE.
-
-2. Download **Antigravity** and **Antigravity IDE** from [Antigravity Google](https://antigravity.google/download).
-
-3. Download, chmod +x, and run `update-Antigravity` script on this git here.
+Download, chmod +x, and run `update-Antigravity` script on this git here.
 
 ## 3. update-Antigravity Script Bug Report
 Please call me at **crosshairawl.ugm@gmail.com** 
