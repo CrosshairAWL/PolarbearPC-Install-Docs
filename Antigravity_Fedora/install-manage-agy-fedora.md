@@ -1,4 +1,4 @@
-# Install & Manage Antigravity and its IDE on Fedora
+# Install & Manage Antigravity Hub and IDE on Fedora
 
 ## 0. Specs
 
