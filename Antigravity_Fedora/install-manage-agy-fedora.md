@@ -72,5 +72,28 @@ rm -f ~/Downloads/Antigravity.tar.gz ~/Downloads/'Antigravity IDE.tar.gz'
 
 2. Chmod +x and run it.
 
-## 3. update-Antigravity Script Bug Report
-Please call me at **crosshairawl.ugm@gmail.com** 
+To report script bug, please call me at **crosshairawl.ugm@gmail.com** 
+
+## 3. Deep Clean Local Files
+
+- Only delete chats -> Run step A.
+- Delete chats and opened projects -> Run step A and B.
+
+```bash
+# --- STEP A
+for base in ~/.gemini/antigravity ~/.gemini/antigravity-ide; do
+  [ -d "$base" ] && rm -rf \
+    "$base/conversations" \
+    "$base/brain" \
+    "$base/annotations" \
+    "$base/code_tracker" \
+    "$base/implicit" \
+    "$base/browser_recordings"
+done
+
+# --- STEP B
+rm -f ~/.gemini/config/projects/*.json
+rm -f ~/.gemini/antigravity/agyhub_summaries_proto.pb
+rm -rf ~/.config/"Antigravity IDE"/User/workspaceStorage/* \
+       ~/.config/Antigravity/User/workspaceStorage/*
+```
