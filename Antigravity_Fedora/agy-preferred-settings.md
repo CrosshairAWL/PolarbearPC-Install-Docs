@@ -16,6 +16,36 @@ My personal choice:
 1. General > Permission > This computer -> **Default**
 2. General > Permission > Remote -> **Default**
 3. Account > General > Enable Telemetry -> **off**
+4. **`~/.gemini/config/config.json`** - adjust with (ofc backup it first):
+```JSON
+{
+  "userSettings": {
+    "artifactReviewMode": "ARTIFACT_REVIEW_MODE_ALWAYS",
+    "autoExecutionPolicy": "CASCADE_COMMANDS_AUTO_EXECUTION_OFF",
+    "browserJsExecutionPolicy": "BROWSER_JS_EXECUTION_POLICY_DISABLED",
+    "enableTerminalSandbox": true,
+    "globalPermissionGrants": {
+      "allow": [],
+      "ask": [
+        "read_file(*)",
+        "write_file(*)",
+        "command(*)",
+        "read_url(*)",
+        "execute_url(*)",
+        "mcp(*)"
+      ],
+      "deny": [
+        "read_file(.git)",
+        "read_file(.env)",
+        "read_file(.env.local)",
+        "read_file(.env.production)"
+      ]
+    },
+    "nonWorkspaceFileAccessPolicy": "AGENT_SETTING_POLICY_ASK",
+    "permissionPreset": "AGENT_PERMISSION_PRESET_DEFAULT"
+  }
+}
+```
 
 ## Extension and its Settings
 
